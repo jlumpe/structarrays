@@ -108,6 +108,26 @@ class TestStructArray:
 		assert np.array_equal(struct.y, [1, 2, 3])
 		assert np.array_equal(struct.z, [[4, 5, 6], [7, 8, 9]])
 
+	def test_init_wrong_shape(self):
+		"""Test initialization from an array of incorrect shape raises ValueError."""
+		# Wrong length
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct(np.zeros(SimpleStruct._size_ + 1))
+
+		# Empty array
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct(np.zeros(0))
+
+		# Wrong number of dimensions
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct(np.zeros((SimpleStruct._size_, 1)))
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct(np.zeros((2, 5)))  # Right total size, wrong shape
+
+		# Array-like with wrong shape gets converted via np.asarray and then checked
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct([1, 2, 3])
+
 	def test_assignment(self):
 		"""Test setting field values."""
 
@@ -185,6 +205,72 @@ class TestStructArray:
 		struct4 = SameSize(struct1.array.copy())
 		assert struct4 != struct1
 
+	def test_convert(self):
+		"""Test convert() classmethod wraps arrays and passes through instances."""
+		# Wraps a numpy array
+		arr = np.zeros(SimpleStruct._size_)
+		struct = SimpleStruct.convert(arr)
+		assert isinstance(struct, SimpleStruct)
+		assert struct.array is arr
+
+		# Existing instance returned unchanged
+		assert SimpleStruct.convert(struct) is struct
+
+		# Wrong type raises TypeError
+		for val in ["not an array", 42, None]:
+			with pytest.raises(TypeError):
+				SimpleStruct.convert(val)  # type: ignore
+
+		# Instance of unrelated StructArray subclass is not accepted
+		nested = NestedStruct()
+		with pytest.raises(TypeError):
+			SimpleStruct.convert(nested)  # type: ignore
+
+		# Array of wrong shape: convert tries to wrap, which raises in __init__
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct.convert(np.zeros(SimpleStruct._size_ + 1))
+
+	def test_unwrap_array(self):
+		"""Test unwrap_array() classmethod returns array given instance, returns array unchanged."""
+
+		# Instance: returns underlying array
+		struct = SimpleStruct()
+		assert SimpleStruct.unwrap_array(struct) is struct.array
+
+		# Array with correct shape: returned unchanged
+		arr = np.zeros(SimpleStruct._size_)
+		assert SimpleStruct.unwrap_array(arr) is arr
+
+		# Array with wrong shape on subclass raises
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct.unwrap_array(np.zeros(SimpleStruct._size_ + 1))
+		with pytest.raises(ValueError, match="incorrect shape"):
+			SimpleStruct.unwrap_array(np.zeros((SimpleStruct._size_, 1)))  # type: ignore
+
+		# Wrong type
+		for val in ["not an array", 42, None]:
+			with pytest.raises(TypeError):
+				SimpleStruct.unwrap_array(val)  # type: ignore
+
+		# Unrelated StructArray subclass: not an instance of cls
+		nested = NestedStruct()
+		with pytest.raises(TypeError):
+			SimpleStruct.unwrap_array(nested)  # type: ignore
+
+		# Called on base StructArray: any 1D array passes through, non-1D raises
+		arr1d = np.zeros(7)
+		assert StructArray.unwrap_array(arr1d) is arr1d
+
+		# Instance of any subclass works
+		assert StructArray.unwrap_array(struct) is struct.array
+		assert StructArray.unwrap_array(nested) is nested.array
+
+		# Non-1D array on base class raises
+		with pytest.raises(ValueError, match="1D"):
+			StructArray.unwrap_array(np.zeros((3, 3)))  # type: ignore
+		with pytest.raises(ValueError, match="1D"):
+			StructArray.unwrap_array(np.zeros(()))  # type: ignore
+
 
 class TestScalarField:
 	"""Tests for ScalarField."""
@@ -254,6 +340,25 @@ class TestArrayField:
 			s.z = s.y  # type: ignore
 		with pytest.raises(ValueError, match="Incorrect shape"):
 			s.y = s.z  # type: ignore
+
+	def test_default_wrong_shape(self):
+		"""Constructing an ArrayField with default of incorrect shape raises ValueError."""
+
+		# 1D wrong length
+		with pytest.raises(ValueError, match="incorrect shape"):
+			ArrayField((3,), default=[1, 2])
+		with pytest.raises(ValueError, match="incorrect shape"):
+			ArrayField((3,), default=np.zeros(4))
+
+		# Wrong number of dimensions
+		with pytest.raises(ValueError, match="incorrect shape"):
+			ArrayField((3,), default=np.zeros((3, 1)))
+		with pytest.raises(ValueError, match="incorrect shape"):
+			ArrayField((2, 3), default=np.zeros(6))
+
+		# 2D wrong shape (right total size)
+		with pytest.raises(ValueError, match="incorrect shape"):
+			ArrayField((2, 3), default=np.zeros((3, 2)))
 
 
 # -----------------------------------------------------------------------------
@@ -485,12 +590,27 @@ class TestDefaultFactory:
 class TestInvalidFieldName:
 	"""Test that reserved/invalid field names are rejected."""
 
-	def test_field_name_collision_with_structarray_attr_raises(self):
-		"""Field name that shadows StructArray attribute raises ValueError."""
-		with pytest.raises(ValueError, match="Invalid field name"):
+	def test_field_name_collision(self):
+		"""Field name that shadows a StructArray method or class variable raises ValueError."""
 
-			class BadStruct(StructArray):
-				_fields_ = arrayfield(1)  # type: ignore
+		# Not all-inclusive
+		for name in ['_fields_', '_size_', 'array', 'copy', 'asdict']:
+			with pytest.raises(ValueError, match="Invalid field name"):
+				attrs = {
+					name: arrayfield(1)
+				}
+				# Dynamic class creation with field of given name
+				type('Bad', (StructArray,), attrs)
+
+	def test_invalid_kwarg_in_init(self):
+		"""Passing a non-field kwarg to ``__init__`` raises ValueError."""
+
+		with pytest.raises(ValueError, match="Invalid field name"):
+			SimpleStruct(nonexistent=1)  # type: ignore
+
+		# Unknown kwarg is rejected even when an array is provided
+		with pytest.raises(ValueError, match="Invalid field name"):
+			SimpleStruct(np.zeros(SimpleStruct._size_), nonexistent=1)  # type: ignore
 
 
 # -----------------------------------------------------------------------------
