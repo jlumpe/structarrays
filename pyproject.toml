@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+
+# -------------------------------------------- Project ------------------------------------------- #
+
+[project]
+name = "structarrays"
+authors = [
+	{name = "Jared Lumpe", email = "jared@jaredlumpe.com"},
+]
+description = "Structured views of NumPy arrays"
+readme = "README.md"
+license = "MIT"
+
+# Get version number dynamically (see [tool.setuptools.dynamic])
+dynamic = ["version"]
+
+
+# ----------------------------------------- Dependencies ----------------------------------------- #
+
+requires-python = ">=3.12"
+dependencies = [
+	"numpy",
+]
+
+
+[dependency-groups]
+dev = [
+	"pytest",
+	"pytest-cov",
+	"ruff",
+]
+
+
+# ------------------------------------------ Additional ------------------------------------------ #
+
+[project.urls]
+Homepage = "https://github.com/jlumpe/structarrays"
+# Repository = "https://github.com/jlumpe/structarrays"
+
+
+[tool.setuptools.dynamic]
+# Set version from __version__ var in structarrays.__init__.py.
+# See https://packaging.python.org/en/latest/discussions/single-source-version
+version = {attr = "structarrays.__version__"}
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                               Ruff                                               #
+# ------------------------------------------------------------------------------------------------ #
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+# Enable the same rule families flake8 enables by default (pycodestyle E/W + pyflakes F).
+select = ["E", "F", "W"]
+ignore = [
+	"W191",  # TABS ARE BETTER
+	"E101",  # indentation contains mixed spaces and tabs - spaces for alignment
+	"W391",  # Blank line at end of file - we require this in .editorconfig
+]
+
+[tool.ruff.format]
+indent-style = "tab"
+quote-style = "single"
