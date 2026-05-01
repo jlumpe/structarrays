@@ -21,6 +21,11 @@ class ScalarField[T](Field[T]):
 	def __init__(self, **kw):
 		super().__init__(1, **kw)
 
+	def update(self, **kw) -> Self:
+		kw.setdefault('default', self.default)
+		kw.setdefault('default_factory', self.default_factory)
+		return type(self)(**kw)
+
 	def _get(self, array: Vector[Any]) -> Any:
 		return array[self.offset]
 
@@ -41,6 +46,12 @@ class ArrayField[S: tuple[int, ...]](Field[np.ndarray[S, Any]]):
 				raise ValueError(f'Default has incorrect shape (expected {shape}, got {default.shape})')
 		super().__init__(math.prod(shape), default=default, **kw)
 
+	def update(self, **kw) -> Self:
+		kw.setdefault('shape', self.shape)
+		kw.setdefault('default', self.default)
+		kw.setdefault('default_factory', self.default_factory)
+		return type(self)(**kw)
+
 	def _from_raw(self, array: Vector[Any]) -> np.ndarray[S, Any]:
 		return array.reshape(self.shape)
 
@@ -59,6 +70,12 @@ class StructField[T: StructArray](Field[T]):
 	def __init__(self, cls: type[T], **kw):
 		self.cls = cls
 		super().__init__(cls._size_, **kw)
+
+	def update(self, **kw) -> Self:
+		kw.setdefault('cls', self.cls)
+		kw.setdefault('default', self.default)
+		kw.setdefault('default_factory', self.default_factory)
+		return type(self)(**kw)
 
 	def set_default(self, array: StructArray | Vector[Any]) -> None:
 		if self.has_default():
@@ -98,6 +115,14 @@ class CustomField[T](Field[T]):
 		super().__init__(size, **kw)
 		self.from_array = from_array
 		self.to_array = to_array
+
+	def update(self, **kw) -> Self:
+		kw.setdefault('size', self.size)
+		kw.setdefault('from_array', self.from_array)
+		kw.setdefault('to_array', self.to_array)
+		kw.setdefault('default', self.default)
+		kw.setdefault('default_factory', self.default_factory)
+		return type(self)(**kw)
 
 	@classmethod
 	def wrap(cls, size: int) -> Callable[[_FromArrayFunc[T]], Self]:

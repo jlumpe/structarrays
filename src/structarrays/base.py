@@ -5,6 +5,7 @@ Base classes.
 from typing import Any, Callable, Self, ClassVar, overload
 from collections.abc import Mapping
 from types import MappingProxyType
+from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -158,7 +159,7 @@ class StructArray[T: np.generic]:
 	__hash__ = None  # pyright: ignore[reportAssignmentType]
 
 
-class Field[T]:
+class Field[T](ABC):
 	"""Descriptor for a field within a StructArray.
 
 	Defines layout (offset, size) and get/set behavior.
@@ -203,8 +204,21 @@ class Field[T]:
 		self.default = default
 		self.default_factory = default_factory
 
+	def copy(self) -> Self:
+		"""Create a copy of the field."""
+		return self.update()
+
+	@abstractmethod
+	def update(self) -> Self:
+		"""Create a copy of the field with different attributes.
+
+		Keyword arguments should match constructor.
+		"""
+
 	def _initialized(self) -> bool:
 		return self.offset >= 0
+
+	# ---------------------------------------- Data access --------------------------------------- #
 
 	def get_raw[E: np.generic](self, array: StructArray[E] | Vector[E]) -> Vector[E]:
 		"""Get the raw array slice for this field from the parent array."""
