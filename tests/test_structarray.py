@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from structarrays import StructArray, arrayfield
+from structarrays.base import StructArrayFields
 from .common import (
 	SimpleStruct, NestedStruct, StructWithDefaults, array_scalar_equal, same_memory,
 )
@@ -77,20 +78,18 @@ class TestCreation:
 	"""Test subclass creation."""
 
 	def test_class_metadata(self):
-		"""Test _fields_, _fields_dict_, _size_ are set correctly."""
+		"""Test _fields_ and  _size_ are set correctly."""
 		# _size_
 		assert SimpleStruct._size_ == 10
+		assert SimpleStruct._fields_.size == SimpleStruct._size_
 
 		# _fields_
-		assert isinstance(SimpleStruct._fields_, tuple)
-		assert len(SimpleStruct._fields_) == 3
-		for i, name in enumerate(['x', 'y', 'z']):
-			assert SimpleStruct._fields_[i] is getattr(SimpleStruct, name)
+		assert isinstance(SimpleStruct._fields_, StructArrayFields)
+		assert SimpleStruct._fields_.names() == ['x', 'y', 'z']
 
-		# _fields_dict_
-		assert SimpleStruct._fields_dict_.keys() == {'x', 'y', 'z'}
-		for k, v in SimpleStruct._fields_dict_.items():
-			assert v is getattr(SimpleStruct, k)
+		# Matches class attributes
+		for field in SimpleStruct._fields_:
+			assert getattr(SimpleStruct, field.name) is field
 
 	def test_field_name_collision(self):
 		"""Field name that shadows a StructArray method or class variable raises ValueError."""
@@ -135,7 +134,7 @@ class TestMethods:
 		"""Test asdict() method with raw=False."""
 		struct = SimpleStruct(np.arange(10, 20))
 		d = struct.asdict()
-		assert d.keys() == SimpleStruct._fields_dict_.keys()
+		assert d.keys() == SimpleStruct._fields_.by_name.keys()
 		for k, v in d.items():
 			assert array_scalar_equal(v, getattr(struct, k))
 
@@ -143,7 +142,7 @@ class TestMethods:
 		"""Test asdict() method with raw=True."""
 		struct = SimpleStruct(np.arange(10, 20))
 		arrs = struct.asdict(raw=True)
-		assert arrs.keys() == SimpleStruct._fields_dict_.keys()
+		assert arrs.keys() == SimpleStruct._fields_.by_name.keys()
 		for k, v in arrs.items():
 			field = getattr(SimpleStruct, k)
 			assert same_memory(v, field.get_raw(struct))

@@ -2,8 +2,11 @@
 Base classes.
 """
 
-from typing import Any, Callable, Self, ClassVar, overload
-from collections.abc import Mapping
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable, Self, ClassVar, SupportsIndex, overload
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from types import MappingProxyType
 from abc import ABC, abstractmethod
 
@@ -14,149 +17,6 @@ from .utils import Missing
 
 
 type Vector[T: np.generic] = np.ndarray[tuple[int], np.dtype[T]]
-
-
-class StructArray[T: np.generic]:
-	"""Structured data backed by a contiguous 1D numpy array.
-
-	Subclasses contain one or more fields (as :class:`Field` instances) which each correspond to a
-	contiguous block of elements in the backing array. Attribute access through the fields
-	transforms the raw array data into the appropriate type.
-
-	Attributes
-	----------
-	_fields_
-		Tuple of field descriptors.
-	_fields_dict_
-		Mapping of field names to descriptors.
-	_size_
-		Total size of the array.
-	array
-		The flat 1D array storing all field data.
-	"""
-
-	_fields_: ClassVar[tuple['Field', ...]] = ()
-	_fields_dict_: ClassVar[Mapping[str, 'Field']] = MappingProxyType({})
-	_size_: ClassVar[int] = 0
-
-	array: Vector[T]
-
-	def __init_subclass__(cls):
-
-		# Support multiple inheritance of other types, but only direct inheritance from StructArray
-		inherit_ok = False
-		for base in cls.__bases__:
-			# Direct child class
-			if base is StructArray:
-				inherit_ok = True
-			# Also not indirect - could happen with above through diamond inheritance
-			elif StructArray in base.__mro__:
-				inherit_ok = False
-				break
-		if not inherit_ok:
-			raise TypeError(f'{cls.__name__} must inherit directly from StructArray')
-
-		fields = []
-		offset = 0
-
-		for name, val in cls.__dict__.items():
-			if isinstance(val, Field):
-				# Clashes with method or base attribute
-				if hasattr(StructArray, name) or name in StructArray.__annotations__:
-					raise ValueError(f'Invalid field name {name!r}')
-				if val._initialized():
-					raise ValueError(f'Field {name!r} already initialized')
-				val.offset = offset  # pyright: ignore[reportAttributeAccessIssue]
-				val.name = name  # pyright: ignore[reportAttributeAccessIssue]
-				offset += val.size
-				fields.append(val)
-
-		cls._fields_ = tuple(fields)
-		cls._fields_dict_ = MappingProxyType({field.name: field for field in fields})
-		cls._size_ = offset
-
-	def __init__(self, array: Vector[T] | ArrayLike | None = None, /, **kw):
-		"""
-		Parameters
-		----------
-		array
-			Array to wrap. If ``None``, allocates a zeroed array and applies field defaults.
-		"""
-		if array is None:
-			self.array = np.zeros(self._size_)  # type: ignore
-			self.set_defaults()
-
-		else:
-			array = np.asarray(array)
-			self._check_shape(array)
-			self.array = array
-
-		# Set field values
-		for name, value in kw.items():
-			if name not in self._fields_dict_:
-				raise ValueError(f'Invalid field name {name!r}')
-			field = self._fields_dict_[name]
-			field.__set__(self, value)
-
-	def set_defaults(self) -> None:
-		"""Reset all field values to their defaults."""
-		for field in self._fields_:
-			field.set_default(self)
-
-	@classmethod
-	def _check_shape(cls: type[Self], array: Vector[T]) -> None:
-		if array.shape != (cls._size_,):
-			raise ValueError(f'Array has incorrect shape (expected {cls._size_}, got {array.shape})')
-
-	@classmethod
-	def convert[S: StructArray[Any]](cls: type[S], obj: Vector[T] | S) -> S:
-		"""Wrap the an array in an instance of the class, or return an existing instance unchanged."""
-		if isinstance(obj, np.ndarray):
-			return cls(obj)
-		if isinstance(obj, cls):
-			return obj
-		raise TypeError(f'Expected ndarray or {cls.__name__}')
-
-	@classmethod
-	def unwrap_array(cls, obj: Vector | Self) -> Vector[Any]:
-		"""
-		Opposite of ``convert()``: unwrap array given instance, given an array return it unchanged.
-
-		Unless called on base class, checks array size matches the class size.
-		"""
-		if isinstance(obj, np.ndarray):
-			if cls is StructArray:
-				if obj.ndim != 1:
-					raise ValueError('Expected 1D array')
-			else:
-				cls._check_shape(obj)
-			return obj
-		elif isinstance(obj, cls):
-			return obj.array
-		raise TypeError(f'Expected ndarray or {cls.__name__}')
-
-	def asdict(self, raw: bool = False) -> dict[str, Any]:
-		"""Get a mapping from field names to their values.
-
-		Parameters
-		----------
-		raw
-			If ``True``, return the raw array views instead of the converted values.
-		"""
-		return {
-			name: field.get_raw(self) if raw else field.__get__(self)
-			for name, field in self._fields_dict_.items()
-		}
-
-	def copy(self) -> Self:
-		return type(self)(self.array.copy())
-
-	def __eq__(self, other: Any) -> bool:
-		# Check type exactly equal, ok due to inheritance being disallowed
-		return type(self) is type(other) and np.array_equal(self.array, other.array)
-
-	# Mutable, explicitly disallow hashing
-	__hash__ = None  # pyright: ignore[reportAssignmentType]
 
 
 class Field[T](ABC):
@@ -312,3 +172,200 @@ class Field[T](ABC):
 	@classmethod
 	def _assignment_unsupported(cls) -> AttributeError:
 		return AttributeError(f'Field of type {cls.__name__} does not support assignment')
+
+
+@dataclass(frozen=True, repr=False)
+class StructArrayFields(Sequence[Field]):
+	"""Sequence of fields for a StructArray.
+
+	Acts as an immutable sequence of field instances, but also supports looking up fields by name.
+	"""
+
+	size: int
+	by_name: Mapping[str, Field]
+	_fields: tuple[Field, ...]
+
+	def __init__(self, fields: Iterable[tuple[str, Field]]):
+		"""Create from ``(name, field)`` pairs.
+
+		Field instances are expected to be uninitialized, they will be initialized during
+		construction of the ``StructArrayFields`` instance.
+		"""
+
+		fields_dict = dict()
+
+		for name, field in fields:
+			if field._initialized():
+				raise ValueError(f'Field {name!r} is already initialized')
+			if name in fields_dict:
+				raise ValueError(f'Duplicate field name {name!r}')
+
+			field.name = name
+			fields_dict[name] = field
+
+		object.__setattr__(self, '_fields', tuple(fields_dict.values()))
+		object.__setattr__(self, 'by_name', MappingProxyType(fields_dict))
+		object.__setattr__(self, 'size', sum(field.size for field in self._fields))
+
+		# Set field offsets
+		offset = 0
+		for field in self._fields:
+			field.offset = offset
+			offset += field.size
+
+	def names(self) -> list[str]:
+		"""Get ordered list of field names."""
+		return [field.name for field in self._fields]
+
+	# ------------------------------------ Sequence interface ------------------------------------ #
+
+	def __len__(self) -> int:
+		return len(self._fields)
+
+	@overload
+	def __getitem__(self, index: SupportsIndex | str) -> Field: ...
+
+	@overload
+	def __getitem__(self, index: slice) -> tuple[Field, ...]: ...
+
+	def __getitem__(self, index: SupportsIndex | str | slice) -> Field | tuple[Field, ...]:
+		if isinstance(index, str):
+			return self.by_name[index]
+		return self._fields[index]
+
+	def __iter__(self) -> Iterator[Field]:
+		return iter(self._fields)
+
+
+class StructArray[T: np.generic]:
+	"""Structured data backed by a contiguous 1D numpy array.
+
+	Subclasses contain one or more fields (as :class:`Field` instances) which each correspond to a
+	contiguous block of elements in the backing array. Attribute access through the fields
+	transforms the raw array data into the appropriate type.
+
+	Attributes
+	----------
+	_fields_
+		Field descriptors.
+	_size_
+		Total size of the array.
+	array
+		The flat 1D array storing all field data.
+	"""
+
+	_fields_: ClassVar[StructArrayFields] = StructArrayFields([])
+	_size_: ClassVar[int] = 0
+
+	array: Vector[T]
+
+	def __init_subclass__(cls):
+
+		# Support multiple inheritance of other types, but only direct inheritance from StructArray
+		inherit_ok = False
+		for base in cls.__bases__:
+			# Direct child class
+			if base is StructArray:
+				inherit_ok = True
+			# Also not indirect - could happen with above through diamond inheritance
+			elif StructArray in base.__mro__:
+				inherit_ok = False
+				break
+		if not inherit_ok:
+			raise TypeError(f'{cls.__name__} must inherit directly from StructArray')
+
+		# Collect fields
+		fields = []
+
+		for name, val in cls.__dict__.items():
+			if isinstance(val, Field):
+				# Clashes with method or base attribute
+				if hasattr(StructArray, name) or name in StructArray.__annotations__:
+					raise ValueError(f'Invalid field name {name!r}')
+				fields.append((name, val))
+
+		cls._fields_ = StructArrayFields(fields)
+		cls._size_ = cls._fields_.size
+
+	def __init__(self, array: Vector[T] | ArrayLike | None = None, /, **kw):
+		"""
+		Parameters
+		----------
+		array
+			Array to wrap. If ``None``, allocates a zeroed array and applies field defaults.
+		"""
+		if array is None:
+			self.array = np.zeros(self._size_)  # type: ignore
+			self.set_defaults()
+
+		else:
+			array = np.asarray(array)
+			self._check_shape(array)
+			self.array = array
+
+		# Set field values
+		for name, value in kw.items():
+			if name not in self._fields_.by_name:
+				raise ValueError(f'Invalid field name {name!r}')
+			field = self._fields_[name]
+			field.__set__(self, value)
+
+	def set_defaults(self) -> None:
+		"""Reset all field values to their defaults."""
+		for field in self._fields_:
+			field.set_default(self)
+
+	@classmethod
+	def _check_shape(cls: type[Self], array: Vector[T]) -> None:
+		if array.shape != (cls._size_,):
+			raise ValueError(f'Array has incorrect shape (expected {cls._size_}, got {array.shape})')
+
+	@classmethod
+	def convert[S: StructArray[Any]](cls: type[S], obj: Vector[T] | S) -> S:
+		"""Wrap an array in an instance of the class, or return an existing instance unchanged."""
+		if isinstance(obj, np.ndarray):
+			return cls(obj)
+		if isinstance(obj, cls):
+			return obj
+		raise TypeError(f'Expected ndarray or {cls.__name__}')
+
+	@classmethod
+	def unwrap_array(cls, obj: Vector | Self) -> Vector[Any]:
+		"""
+		Opposite of ``convert()``: unwrap array given instance, given an array return it unchanged.
+
+		Unless called on base class, checks array size matches the class size.
+		"""
+		if isinstance(obj, np.ndarray):
+			if cls is StructArray:
+				if obj.ndim != 1:
+					raise ValueError('Expected 1D array')
+			else:
+				cls._check_shape(obj)
+			return obj
+		elif isinstance(obj, cls):
+			return obj.array
+		raise TypeError(f'Expected ndarray or {cls.__name__}')
+
+	def asdict(self, raw: bool = False) -> dict[str, Any]:
+		"""Get a mapping from field names to their values.
+
+		Parameters
+		----------
+		raw
+			If ``True``, return the raw array views instead of the converted values.
+		"""
+		return {
+			field.name: field.get_raw(self) if raw else field.__get__(self)
+			for field in self._fields_
+		}
+
+	def copy(self) -> Self:
+		return type(self)(self.array.copy())
+
+	def __eq__(self, other: Any) -> bool:
+		# Check type exactly equal, ok due to inheritance being disallowed
+		return type(self) is type(other) and np.array_equal(self.array, other.array)
+
+	# Mutable, explicitly disallow hashing
+	__hash__ = None  # pyright: ignore[reportAssignmentType]

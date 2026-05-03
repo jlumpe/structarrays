@@ -12,6 +12,36 @@ from .common import (
 )
 
 
+class TestStructArrayFields:
+	"""Tests for StructArrayFields."""
+
+	def test_basic(self):
+		fields = SimpleStruct._fields_
+
+		assert fields.size == sum(field.size for field in fields)
+		assert fields.by_name == {field.name: field for field in fields}
+		assert fields.names() == [field.name for field in fields]
+
+	def test_sequence(self):
+		"""Test sequence protocol."""
+
+		fields = SimpleStruct._fields_
+		fields_list = list(fields)
+
+		# Length matches iteration
+		assert len(fields) == len(fields_list)
+
+		# Item access
+		for i, field in enumerate(fields):
+			assert fields[i] is field
+			# Lookup by name also supported
+			assert fields[field.name] is field
+
+		# Slicing
+		for slice_ in [slice(2), slice(1, 3)]:
+			assert fields[slice_] == tuple(fields_list[slice_])
+
+
 class TestScalarField:
 	"""Tests for ScalarField."""
 
