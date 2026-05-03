@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Self, ClassVar, SupportsIndex, overload
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from types import MappingProxyType
 from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .utils import Missing
+from .utils import Missing, check_shape
 
 
 type Vector[T: np.generic] = np.ndarray[tuple[int], np.dtype[T]]
@@ -33,9 +33,11 @@ class Field[T](ABC):
 	Attributes
 	----------
 	size
-		Number of array elements containing the field's data.
+		Number of array elements containing the field's data. Negative means the size is
+		unspecified, a class with the field will be considered abstract.
 	offset
-		Index of the first array element for the field.
+		Index of the first array element for the field. Negative if the field or ``StructArray``
+		instance that contains it is abstract.
 	name
 		Name of the field.
 	default
@@ -49,6 +51,7 @@ class Field[T](ABC):
 	name: str
 	default: T | Missing
 	default_factory: Callable[[], T] | None
+	_initialized: bool
 
 	def __init__(
 		self,
@@ -58,11 +61,58 @@ class Field[T](ABC):
 	):
 		if not isinstance(default, Missing) and default_factory is not None:
 			raise ValueError('Cannot specify both default and default_factory')
+		self._initialized = False
 		self.size = size
 		self.offset = -1
 		self.name = ''
 		self.default = default
 		self.default_factory = default_factory
+
+	def _init(self, name: str, offset: int = -1) -> None:
+		if self._initialized:
+			raise ValueError(f'Field {self.name!r} is already initialized')
+		self.name = name
+		self.offset = offset
+		self._initialized = True
+
+	def _check(self) -> None:
+		if not self._initialized:
+			raise ValueError('Field is not initialized')
+		if self.offset < 0:
+			raise ValueError('Field offset not defined (field or field set is abstract)')
+
+	def is_abstract(self) -> bool:
+		return self.size < 0
+
+	def check_override(self, field: 'Field') -> None:
+		"""Validate field overriding this one in a subclass.
+
+		Raises
+		------
+		ValueError
+			If the field overrides this one in an incompatible way.
+		"""
+		self._check_override_subclass(field)
+
+	@overload
+	def _check_override_subclass(self, field: Field, cls: None = None) -> Self: ...
+
+	@overload
+	def _check_override_subclass[F: Field](self, field: Field, cls: type[F]) -> F: ...
+
+	def _check_override_subclass(self, field: Field, cls: type[Field] | None = None) -> Field:
+		"""Check overriding field is an instance of the same class (or the given class).
+
+		Return argument as the given type for the benefit of the type checker.
+		"""
+		if cls is None:
+			cls = type(self)
+		if not isinstance(field, cls):
+			raise ValueError(
+				f'Cannot override field {self.name!r} of type {cls.__name__} '
+				f'with a field of type {type(field).__name__}'
+			)
+		return field
 
 	def copy(self) -> Self:
 		"""Create a copy of the field."""
@@ -74,9 +124,6 @@ class Field[T](ABC):
 
 		Keyword arguments should match constructor.
 		"""
-
-	def _initialized(self) -> bool:
-		return self.offset >= 0
 
 	# ----------------------------------------- Defaults ----------------------------------------- #
 
@@ -91,6 +138,22 @@ class Field[T](ABC):
 		if self.default_factory is not None:
 			return self.default_factory()
 		return Missing()
+
+	# ---------------------------------------- Data access --------------------------------------- #
+
+	def get_raw[E: np.generic](self, array: StructArray[E] | Vector[E]) -> Vector[E]:
+		"""Get the raw array slice for this field from the parent array."""
+		self._check()
+		if isinstance(array, StructArray):
+			array = array.array
+		return array[self.offset:self.offset + self.size]
+
+	def set_raw(self, array: StructArray | Vector[Any], value: Any) -> None:
+		"""Write the raw array slice for this field in the parent array."""
+		self._check()
+		if isinstance(array, StructArray):
+			array = array.array
+		array[self.offset:self.offset + self.size] = value
 
 	def set_default(self, array: StructArray | Vector[Any]) -> None:
 		"""Apply this field's default to the given struct instance or array.
@@ -107,6 +170,7 @@ class Field[T](ABC):
 
 	def _zero(self, array: Vector[Any]) -> None:
 		"""Set the field's slice to zero."""
+		self._check()
 		array[self.offset:self.offset + self.size] = 0
 
 	# ---------------------------------------- Data access --------------------------------------- #
@@ -148,11 +212,13 @@ class Field[T](ABC):
 	def __get__(self, instance: None, owner=None) -> Self: ...
 
 	def __get__(self, instance: StructArray | None, owner=None) -> T | Self:
+		self._check()
 		if instance is None:
 			return self
 		return self.get(instance.array)
 
 	def __set__(self, instance: StructArray | None, value: T) -> None:
+		self._check()
 		if instance is None:
 			raise AttributeError('Cannot set Field attribute on class')
 		self.set(instance.array, value)
@@ -187,37 +253,64 @@ class StructArrayFields(Sequence[Field]):
 	by_name: Mapping[str, Field]
 	_fields: tuple[Field, ...]
 
-	def __init__(self, fields: Iterable[tuple[str, Field]]):
-		"""Create from ``(name, field)`` pairs.
-
-		Field instances are expected to be uninitialized, they will be initialized during
-		construction of the ``StructArrayFields`` instance.
+	def __init__(self, fields: Mapping[str, Field]):
+		"""Create from a dictionary of uninitialized fields. The fields will be initialized with
+		names and offsets (the latter only if all are non-abstract).
 		"""
+		fields = dict(fields)
 
-		fields_dict = dict()
+		# Empty -> abstract
+		is_abstract = not fields or any(field.is_abstract() for field in fields.values())
 
-		for name, field in fields:
-			if field._initialized():
-				raise ValueError(f'Field {name!r} is already initialized')
-			if name in fields_dict:
-				raise ValueError(f'Duplicate field name {name!r}')
+		object.__setattr__(self, '_fields', tuple(fields.values()))
+		object.__setattr__(self, 'by_name', MappingProxyType(fields))
 
-			field.name = name
-			fields_dict[name] = field
+		if is_abstract:
+			object.__setattr__(self, 'size', -1)
 
-		object.__setattr__(self, '_fields', tuple(fields_dict.values()))
-		object.__setattr__(self, 'by_name', MappingProxyType(fields_dict))
-		object.__setattr__(self, 'size', sum(field.size for field in self._fields))
+			for name, field in fields.items():
+				field._init(name)
 
-		# Set field offsets
-		offset = 0
-		for field in self._fields:
-			field.offset = offset
-			offset += field.size
+		else:
+			offset = 0
+			for name, field in fields.items():
+				field._init(name, offset)
+				offset += field.size
+
+			object.__setattr__(self, 'size', offset)
+
+	def is_abstract(self) -> bool:
+		return self.size < 0
 
 	def names(self) -> list[str]:
-		"""Get ordered list of field names."""
 		return [field.name for field in self._fields]
+
+	def abstract_fields(self) -> list[Field]:
+		return [field for field in self._fields if field.is_abstract()]
+
+	def update(self, fields: Mapping[str, Field]) -> StructArrayFields:
+		"""Update with new or overriding field definitions, as in class inheritance.
+
+		New fields will be appended to the end. Overrides to existing fields will be checked for
+		compatibility.
+		"""
+
+		merged = dict()
+
+		# Existing fields - check for overrides, otherwise copy from self
+		for field in self:
+			if field.name in fields:
+				field.check_override(fields[field.name])
+				merged[field.name] = fields[field.name]
+			else:
+				merged[field.name] = field.copy()
+
+		# Append new fields
+		for name, field in fields.items():
+			if name not in self.by_name:
+				merged[name] = field
+
+		return StructArrayFields(merged)
 
 	# ------------------------------------ Sequence interface ------------------------------------ #
 
@@ -256,37 +349,36 @@ class StructArray[T: np.generic]:
 		The flat 1D array storing all field data.
 	"""
 
-	fields: ClassVar[StructArrayFields] = StructArrayFields([])
-	size: ClassVar[int] = 0
+	fields: ClassVar[StructArrayFields] = StructArrayFields({})
+	size: ClassVar[int] = -1
 
 	array: Vector[T]
 
 	def __init_subclass__(cls):
 
-		# Support multiple inheritance of other types, but only direct inheritance from StructArray
-		inherit_ok = False
+		# Determine parent StructArray class
+		parent = None
+
 		for base in cls.__bases__:
-			# Direct child class
-			if base is StructArray:
-				inherit_ok = True
-			# Also not indirect - could happen with above through diamond inheritance
-			elif StructArray in base.__mro__:
-				inherit_ok = False
-				break
-		if not inherit_ok:
-			raise TypeError(f'{cls.__name__} must inherit directly from StructArray')
+			if issubclass(base, StructArray):
+				if parent is not None:
+					raise TypeError('Multiple inheritance of StructArray classes is not supported')
+				parent = base
+
+		# Shouldn't be possible?
+		assert parent is not None
 
 		# Collect fields
-		fields = []
+		fields = dict()
 
 		for name, val in cls.__dict__.items():
 			if isinstance(val, Field):
 				# Clashes with method or base attribute
 				if hasattr(StructArray, name) or name in StructArray.__annotations__:
 					raise ValueError(f'Invalid field name {name!r}')
-				fields.append((name, val))
+				fields[name] = val
 
-		cls.fields = StructArrayFields(fields)
+		cls.fields = parent.fields.update(fields)
 		cls.size = cls.fields.size
 
 	def __init__(self, array: Vector[T] | ArrayLike | None = None, /, **kw):
@@ -296,13 +388,16 @@ class StructArray[T: np.generic]:
 		array
 			Array to wrap. If ``None``, allocates a zeroed array and applies field defaults.
 		"""
+		if self.is_abstract():
+			raise TypeError(f'Cannot instantiate abstract StructArray subclass {type(self).__name__}')
+
 		if array is None:
 			self.array = np.zeros(self.size)  # type: ignore
 			self.set_defaults()
 
 		else:
 			array = np.asarray(array)
-			self._check_shape(array)
+			check_shape(array, (self.size,))
 			self.array = array
 
 		# Set field values
@@ -312,15 +407,14 @@ class StructArray[T: np.generic]:
 			field = self.fields[name]
 			field.set(self.array, value)
 
+	@classmethod
+	def is_abstract(cls) -> bool:
+		return cls.size < 0
+
 	def set_defaults(self) -> None:
 		"""Reset all field values to their defaults."""
 		for field in self.fields:
 			field.set_default(self)
-
-	@classmethod
-	def _check_shape(cls: type[Self], array: Vector[T]) -> None:
-		if array.shape != (cls.size,):
-			raise ValueError(f'Array has incorrect shape (expected {cls.size}, got {array.shape})')
 
 	@classmethod
 	def convert[S: StructArray[Any]](cls: type[S], obj: Vector[T] | S) -> S:
@@ -339,14 +433,17 @@ class StructArray[T: np.generic]:
 		Unless called on base class, checks array size matches the class size.
 		"""
 		if isinstance(obj, np.ndarray):
-			if cls is StructArray:
+			# Abstract: just check 1D
+			if cls.is_abstract():
 				if obj.ndim != 1:
 					raise ValueError('Expected 1D array')
 			else:
-				cls._check_shape(obj)
+				check_shape(obj, (cls.size,))
 			return obj
+
 		elif isinstance(obj, cls):
 			return obj.array
+
 		raise TypeError(f'Expected ndarray or {cls.__name__}')
 
 	def asdict(self, raw: bool = False) -> dict[str, Any]:
