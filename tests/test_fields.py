@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from structarrays import (
-	StructArray, ScalarField, ArrayField, StructField, CustomField, arrayfield,
+	StructArray, ScalarField, ArrayField, StructField, CustomField, field,
 )
 from structarrays.utils import Missing
 from .common import (
@@ -162,7 +162,7 @@ class TestStructField:
 		thedefault = NestedInner(a=1, b=[2, 3])
 
 		class WithDefault(StructArray):
-			inner = arrayfield(NestedInner, default=thedefault)
+			inner = field(NestedInner, default=thedefault)
 
 		struct1 = WithDefault()
 		assert struct1.inner == thedefault
@@ -170,7 +170,7 @@ class TestStructField:
 		assert disjoint_memory(struct1.inner, thedefault)
 
 		class WithDefaultFactory(StructArray):
-			inner = arrayfield(NestedInner, default_factory=thedefault.copy)
+			inner = field(NestedInner, default_factory=thedefault.copy)
 
 		struct2 = WithDefaultFactory()
 		assert struct2.inner == thedefault
@@ -294,32 +294,32 @@ class TestFieldFunction:
 	"""Tests for the field() convenience function."""
 
 	def test_field_none_returns_scalar(self):
-		f = arrayfield(None)
+		f = field(None)
 		assert isinstance(f, ScalarField)
 		assert f.size == 1
 
 	def test_field_int_returns_1d_array(self):
-		f = arrayfield(5)
+		f = field(5)
 		assert isinstance(f, ArrayField)
 		assert f.shape == (5,)
 		assert f.size == 5
 
 	def test_field_tuple_returns_nd_array(self):
-		f = arrayfield((2, 3))
+		f = field((2, 3))
 		assert isinstance(f, ArrayField)
 		assert f.shape == (2, 3)
 		assert f.size == 6
 
 	def test_field_struct_type_returns_struct_field(self):
-		f = arrayfield(NestedInner)
+		f = field(NestedInner)
 		assert isinstance(f, StructField)
 		assert f.cls is NestedInner
 		assert f.size == NestedInner.size
 
 	def test_field_passes_kwargs(self):
-		f = arrayfield(None, default=99.0)
+		f = field(None, default=99.0)
 		assert f.default == 99.0
-		f2 = arrayfield(3, default_factory=lambda: np.ones(3))
+		f2 = field(3, default_factory=lambda: np.ones(3))
 		assert f2.default_factory is not None
 		arr = f2.get_default()
 		assert arr is not None

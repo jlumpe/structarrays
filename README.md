@@ -20,12 +20,12 @@ Define a `StructArray` subclass with `position` and `velocity` fields (both 2D v
 ```python
 import numpy as np
 from scipy.integrate import solve_ivp
-from structarrays import StructArray, arrayfield
+from structarrays import StructArray, field
 
 
 class State(StructArray):
-	position = arrayfield(2)
-	velocity = arrayfield(2)
+	position = field(2)
+	velocity = field(2)
 
 
 def dynamics(t, y):
@@ -59,23 +59,23 @@ Demonstration of different field types:
 
 ```python
 import numpy as np
-from structarrays import StructArray, arrayfield
+from structarrays import StructArray, field
 
 
 class Point(StructArray):
-	x = arrayfield()
-	y = arrayfield()
+	x = field()
+	y = field()
 
 
 class MyStruct(StructArray):
 	# Scalar
-	scalar = arrayfield()
+	scalar = field()
 	# 3-element vector
-	vector = arrayfield(3)
+	vector = field(3)
 	# 3x3 matrix
-	matrix = arrayfield((3, 3))
+	matrix = field((3, 3))
 	# Nested StructArray instance
-	point = arrayfield(Point)
+	point = field(Point)
 ```
 
 
@@ -102,21 +102,21 @@ array([[ 4,  5,  6],
 
 ### Scalar
 
-Provides access to a single array element. Create with `arrayfield()` or `arrayfield(None)`.
+Provides access to a single array element. Create with `field()` or `field(None)`.
 
 
 ### Subarray
 
 A writeable view into the the struct's underlying array, optionally reshaped to the given size:
 
-- `arrayfield(3)`: 1D array of length 3
-- `arrayfield((2, 3, 4))`: 3D array with shape `(2, 3, 4)`.
+- `field(3)`: 1D array of length 3
+- `field((2, 3, 4))`: 3D array with shape `(2, 3, 4)`.
 
 
 ### Nested structure
 
 An instance of another `StructArray` subclass. The array it wraps is a view of the parent's data,
-writes to one will affect the other. Create by passing the nested subclass to `arrayfield()`.
+writes to one will affect the other. Create by passing the nested subclass to `field()`.
 
 
 ### Custom field

@@ -10,7 +10,7 @@ __version__ = '0.1.0'
 __all__ = [
 	'StructArray',
 	'Field',
-	'arrayfield',
+	'field',
 	'ScalarField',
 	'ArrayField',
 	'StructField',
@@ -19,4 +19,4 @@ __all__ = [
 
 
 from .base import StructArray, Field
-from .fields import arrayfield, ScalarField, ArrayField, StructField, CustomField
+from .fields import field, ScalarField, ArrayField, StructField, CustomField

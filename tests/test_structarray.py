@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from structarrays import StructArray, arrayfield
+from structarrays import StructArray, field
 from structarrays.base import StructArrayFields
 from .common import (
 	SimpleStruct, NestedStruct, StructWithDefaults, array_scalar_equal, same_memory,
@@ -98,7 +98,7 @@ class TestCreation:
 		for name in ['fields', 'size', 'array', 'copy', 'asdict']:
 			with pytest.raises(ValueError, match="Invalid field name"):
 				attrs = {
-					name: arrayfield(1)
+					name: field(1)
 				}
 				# Dynamic class creation with field of given name
 				type('Bad', (StructArray,), attrs)
@@ -168,7 +168,7 @@ class TestMethods:
 
 		# Same array contents, but different class
 		class SameSize(StructArray):
-			x = arrayfield(SimpleStruct.size)
+			x = field(SimpleStruct.size)
 
 		struct4 = SameSize(struct1.array.copy())
 		assert struct4 != struct1

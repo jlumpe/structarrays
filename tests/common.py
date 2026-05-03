@@ -1,6 +1,6 @@
 import numpy as np
 
-from structarrays import StructArray, arrayfield
+from structarrays import StructArray, field
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -50,26 +50,26 @@ def disjoint_memory(arr1: StructArray | np.ndarray, arr2: StructArray | np.ndarr
 class SimpleStruct(StructArray):
 	"""Struct with scalar, vector, and matrix fields."""
 
-	x = arrayfield(None, default=1.5)
-	y = arrayfield(3)
-	z = arrayfield((2, 3), default=[[11, 12, 13], [21, 22, 23]])
+	x = field(None, default=1.5)
+	y = field(3)
+	z = field((2, 3), default=[[11, 12, 13], [21, 22, 23]])
 
 
 class NestedInner(StructArray):
 	"""Inner struct for nesting tests."""
 
-	a = arrayfield(None, default=10.0)
-	b = arrayfield(2)
+	a = field(None, default=10.0)
+	b = field(2)
 
 
 class NestedStruct(StructArray):
 	"""Struct with nested StructArray field."""
 
-	inner = arrayfield(NestedInner)
-	z = arrayfield(None, default=3.0)
+	inner = field(NestedInner)
+	z = field(None, default=3.0)
 
 
 class StructWithDefaults(StructArray):
 	"""Struct with default_factory."""
 
-	vec = arrayfield(3, default_factory=lambda: np.array([1, 2, 3]))
+	vec = field(3, default_factory=lambda: np.array([1, 2, 3]))
