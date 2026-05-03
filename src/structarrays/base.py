@@ -246,16 +246,16 @@ class StructArray[T: np.generic]:
 
 	Attributes
 	----------
-	_fields_
-		Field descriptors.
-	_size_
-		Total size of the array.
+	fields
+		Field descriptors (class attribute).
+	size
+		Total size of the array (class attribute).
 	array
 		The flat 1D array storing all field data.
 	"""
 
-	_fields_: ClassVar[StructArrayFields] = StructArrayFields([])
-	_size_: ClassVar[int] = 0
+	fields: ClassVar[StructArrayFields] = StructArrayFields([])
+	size: ClassVar[int] = 0
 
 	array: Vector[T]
 
@@ -284,8 +284,8 @@ class StructArray[T: np.generic]:
 					raise ValueError(f'Invalid field name {name!r}')
 				fields.append((name, val))
 
-		cls._fields_ = StructArrayFields(fields)
-		cls._size_ = cls._fields_.size
+		cls.fields = StructArrayFields(fields)
+		cls.size = cls.fields.size
 
 	def __init__(self, array: Vector[T] | ArrayLike | None = None, /, **kw):
 		"""
@@ -295,7 +295,7 @@ class StructArray[T: np.generic]:
 			Array to wrap. If ``None``, allocates a zeroed array and applies field defaults.
 		"""
 		if array is None:
-			self.array = np.zeros(self._size_)  # type: ignore
+			self.array = np.zeros(self.size)  # type: ignore
 			self.set_defaults()
 
 		else:
@@ -305,20 +305,20 @@ class StructArray[T: np.generic]:
 
 		# Set field values
 		for name, value in kw.items():
-			if name not in self._fields_.by_name:
+			if name not in self.fields.by_name:
 				raise ValueError(f'Invalid field name {name!r}')
-			field = self._fields_[name]
+			field = self.fields[name]
 			field.__set__(self, value)
 
 	def set_defaults(self) -> None:
 		"""Reset all field values to their defaults."""
-		for field in self._fields_:
+		for field in self.fields:
 			field.set_default(self)
 
 	@classmethod
 	def _check_shape(cls: type[Self], array: Vector[T]) -> None:
-		if array.shape != (cls._size_,):
-			raise ValueError(f'Array has incorrect shape (expected {cls._size_}, got {array.shape})')
+		if array.shape != (cls.size,):
+			raise ValueError(f'Array has incorrect shape (expected {cls.size}, got {array.shape})')
 
 	@classmethod
 	def convert[S: StructArray[Any]](cls: type[S], obj: Vector[T] | S) -> S:
@@ -357,7 +357,7 @@ class StructArray[T: np.generic]:
 		"""
 		return {
 			field.name: field.get_raw(self) if raw else field.__get__(self)
-			for field in self._fields_
+			for field in self.fields
 		}
 
 	def copy(self) -> Self:

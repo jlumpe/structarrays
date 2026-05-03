@@ -69,7 +69,7 @@ class StructField[T: StructArray](Field[T]):
 
 	def __init__(self, cls: type[T], **kw):
 		self.cls = cls
-		super().__init__(cls._size_, **kw)
+		super().__init__(cls.size, **kw)
 
 	def update(self, **kw) -> Self:
 		kw.setdefault('cls', self.cls)

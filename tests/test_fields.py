@@ -16,7 +16,7 @@ class TestStructArrayFields:
 	"""Tests for StructArrayFields."""
 
 	def test_basic(self):
-		fields = SimpleStruct._fields_
+		fields = SimpleStruct.fields
 
 		assert fields.size == sum(field.size for field in fields)
 		assert fields.by_name == {field.name: field for field in fields}
@@ -25,7 +25,7 @@ class TestStructArrayFields:
 	def test_sequence(self):
 		"""Test sequence protocol."""
 
-		fields = SimpleStruct._fields_
+		fields = SimpleStruct.fields
 		fields_list = list(fields)
 
 		# Length matches iteration
@@ -144,7 +144,7 @@ class TestStructField:
 		assert struct1.z == 3.0
 
 		# With array - not modified
-		arr = np.full(NestedStruct._size_, 42)
+		arr = np.full(NestedStruct.size, 42)
 		struct2 = NestedStruct(arr)
 		assert struct2.inner.a == 42
 		assert np.array_equal(struct2.inner.b, [42, 42])
@@ -186,7 +186,7 @@ class TestStructField:
 
 	def test_nested_is_view(self):
 		"""Nested struct shares parent array storage."""
-		arr = np.zeros(NestedStruct._size_)
+		arr = np.zeros(NestedStruct.size)
 		struct = NestedStruct(arr)
 
 		# Set nested field, read parent array
@@ -271,7 +271,7 @@ class TestFieldDescriptor:
 	def test_get_set_raw(self, pass_array: bool):
 		"""Test get_raw() and set_raw() methods."""
 
-		struct = SimpleStruct(np.full(SimpleStruct._size_, -1))
+		struct = SimpleStruct(np.full(SimpleStruct.size, -1))
 		arg = struct.array if pass_array else struct
 
 		# Set
@@ -314,7 +314,7 @@ class TestFieldFunction:
 		f = arrayfield(NestedInner)
 		assert isinstance(f, StructField)
 		assert f.cls is NestedInner
-		assert f.size == NestedInner._size_
+		assert f.size == NestedInner.size
 
 	def test_field_passes_kwargs(self):
 		f = arrayfield(None, default=99.0)
