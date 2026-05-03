@@ -42,6 +42,43 @@ class TestStructArrayFields:
 			assert fields[slice_] == tuple(fields_list[slice_])
 
 
+class TestField:
+	"""Test base Field class behavior."""
+
+	def test_get_on_class_returns_descriptor(self):
+		"""Accessing field on class returns the descriptor, not value."""
+		for field in SimpleStruct.fields:
+			assert getattr(SimpleStruct, field.name) is field
+
+	@pytest.mark.parametrize('pass_array', [True, False])
+	def test_get_set_raw(self, pass_array: bool):
+		"""Test get_raw() and set_raw() methods."""
+
+		struct = SimpleStruct(np.full(SimpleStruct.size, -1))
+		arg = struct.array if pass_array else struct
+
+		# Set
+		SimpleStruct.x.set_raw(arg, 0)
+		SimpleStruct.y.set_raw(arg, [1, 2, 3])
+		SimpleStruct.z.set_raw(arg, [4, 5, 6, 7, 8, 9])
+		assert np.array_equal(struct.array, np.arange(10))
+
+		# Get
+		assert same_memory(SimpleStruct.x.get_raw(arg), struct.array[0:1])
+		assert same_memory(SimpleStruct.y.get_raw(arg), struct.array[1:4])
+		assert same_memory(SimpleStruct.z.get_raw(arg), struct.array[4:10])
+
+	def test_defaults(self):
+		f = ScalarField(default=42.0)
+		assert f.get_default() == 42.0
+
+		f = ScalarField(default_factory=lambda: 99)
+		assert f.get_default() == 99
+
+		f = ScalarField()
+		assert f.get_default() is Missing()
+
+
 class TestScalarField:
 	"""Tests for ScalarField."""
 
@@ -256,37 +293,6 @@ class TestCustomField:
 
 
 # -----------------------------------------------------------------------------
-# Field descriptor tests
-# -----------------------------------------------------------------------------
-
-class TestFieldDescriptor:
-	"""Tests for Field descriptor protocol."""
-
-	def test_get_on_class_returns_descriptor(self):
-		"""Accessing field on class returns the descriptor, not value."""
-		f = SimpleStruct.y
-		assert isinstance(f, ArrayField)
-
-	@pytest.mark.parametrize('pass_array', [True, False])
-	def test_get_set_raw(self, pass_array: bool):
-		"""Test get_raw() and set_raw() methods."""
-
-		struct = SimpleStruct(np.full(SimpleStruct.size, -1))
-		arg = struct.array if pass_array else struct
-
-		# Set
-		SimpleStruct.x.set_raw(arg, 0)
-		SimpleStruct.y.set_raw(arg, [1, 2, 3])
-		SimpleStruct.z.set_raw(arg, [4, 5, 6, 7, 8, 9])
-		assert np.array_equal(struct.array, np.arange(10))
-
-		# Get
-		assert same_memory(SimpleStruct.x.get_raw(arg), struct.array[0:1])
-		assert same_memory(SimpleStruct.y.get_raw(arg), struct.array[1:4])
-		assert same_memory(SimpleStruct.z.get_raw(arg), struct.array[4:10])
-
-
-# -----------------------------------------------------------------------------
 # field() convenience function tests
 # -----------------------------------------------------------------------------
 
@@ -324,23 +330,3 @@ class TestFieldFunction:
 		arr = f2.get_default()
 		assert arr is not None
 		assert np.array_equal(arr, [1, 1, 1])
-
-
-# -----------------------------------------------------------------------------
-# Field.get_default / set_default tests
-# -----------------------------------------------------------------------------
-
-class TestFieldDefaults:
-	"""Tests for Field default handling."""
-
-	def test_get_default_from_value(self):
-		f = ScalarField(default=42.0)
-		assert f.get_default() == 42.0
-
-	def test_get_default_from_factory(self):
-		f = ScalarField(default_factory=lambda: 99)
-		assert f.get_default() == 99
-
-	def test_get_default_missing(self):
-		f = ScalarField()
-		assert f.get_default() is Missing()
