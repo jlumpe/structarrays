@@ -82,7 +82,7 @@ class StructField[T: StructArray](Field[T]):
 			return super().set_default(array)
 		if isinstance(array, StructArray):
 			array = array.array
-		self._get(array).set_defaults()
+		self.get(array).set_defaults()
 
 	def _from_raw(self, array: Vector[Any]) -> T:
 		return self.cls(array)

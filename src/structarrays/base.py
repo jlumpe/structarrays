@@ -24,8 +24,8 @@ class Field[T](ABC):
 
 	Defines layout (offset, size) and get/set behavior.
 
-	Subclasses must implement :meth:`_get` or :meth:`_from_raw`, and can optionally implement
-	:meth:`_set` or :meth:`_to_raw` to support assignment.
+	Subclasses must implement :meth:`get` or :meth:`_from_raw`, and can optionally implement
+	:meth:`set` or :meth:`_to_raw` to support assignment.
 
 	If neither ``default`` nor ``default_factory`` are provided, the default corresponds to the
 	array slice containing all zeros.
@@ -78,19 +78,7 @@ class Field[T](ABC):
 	def _initialized(self) -> bool:
 		return self.offset >= 0
 
-	# ---------------------------------------- Data access --------------------------------------- #
-
-	def get_raw[E: np.generic](self, array: StructArray[E] | Vector[E]) -> Vector[E]:
-		"""Get the raw array slice for this field from the parent array."""
-		if isinstance(array, StructArray):
-			array = array.array
-		return array[self.offset:self.offset + self.size]
-
-	def set_raw(self, array: StructArray | Vector[Any], value: Any) -> None:
-		"""Write the raw array slice for this field in the parent array."""
-		if isinstance(array, StructArray):
-			array = array.array
-		array[self.offset:self.offset + self.size] = value
+	# ----------------------------------------- Defaults ----------------------------------------- #
 
 	def has_default(self) -> bool:
 		"""Whether the field has an explicit default set."""
@@ -113,13 +101,45 @@ class Field[T](ABC):
 			array = array.array
 		default = self.get_default()
 		if not isinstance(default, Missing):
-			self._set(array, default)
+			self.set(array, default)
 		else:
 			self._zero(array)
 
 	def _zero(self, array: Vector[Any]) -> None:
 		"""Set the field's slice to zero."""
 		array[self.offset:self.offset + self.size] = 0
+
+	# ---------------------------------------- Data access --------------------------------------- #
+
+	def get(self, array: Vector[Any]) -> T:
+		"""Get the value from the parent array."""
+		field_arr = self.get_raw(array)
+		try:
+			value = self._from_raw(field_arr)
+		except NotImplementedError:
+			raise TypeError(f'Field subclass {self.__class__.__name__} must implement get() or _from_raw()') from None
+		return value
+
+	def set(self, array: Vector[Any], value: T) -> None:
+		"""Set the value in the parent array."""
+		try:
+			slice_value = self._to_raw(value)
+		except NotImplementedError:
+			raise self._assignment_unsupported() from None
+
+		self.set_raw(array, slice_value)
+
+	def get_raw[E: np.generic](self, array: StructArray[E] | Vector[E]) -> Vector[E]:
+		"""Get the raw array slice for this field from the parent array."""
+		if isinstance(array, StructArray):
+			array = array.array
+		return array[self.offset:self.offset + self.size]
+
+	def set_raw(self, array: StructArray | Vector[Any], value: Any) -> None:
+		"""Write the raw array slice for this field in the parent array."""
+		if isinstance(array, StructArray):
+			array = array.array
+		array[self.offset:self.offset + self.size] = value
 
 	@overload
 	def __get__(self, instance: StructArray, owner=None) -> T: ...
@@ -130,42 +150,24 @@ class Field[T](ABC):
 	def __get__(self, instance: StructArray | None, owner=None) -> T | Self:
 		if instance is None:
 			return self
-		return self._get(instance.array)
+		return self.get(instance.array)
 
 	def __set__(self, instance: StructArray | None, value: T) -> None:
 		if instance is None:
 			raise AttributeError('Cannot set Field attribute on class')
-		self._set(instance.array, value)
-
-	def _get(self, array: Vector[Any]) -> T:
-		"""Get the value from the parent array."""
-		field_arr = self.get_raw(array)
-		try:
-			value = self._from_raw(field_arr)
-		except NotImplementedError:
-			raise TypeError(f'Field subclass {self.__class__.__name__} must implement _get() or _from_raw()') from None
-		return value
+		self.set(instance.array, value)
 
 	def _from_raw(self, array: Vector[Any]) -> T:
 		"""Get the value from the field's slice of the parent array.
 
-		Not required, but used in default implementation of ``_get()``.
+		Not required, but used in default implementation of ``get()``.
 		"""
 		raise NotImplementedError()
-
-	def _set(self, array: Vector[Any], value: T) -> None:
-		"""Set the value in the parent array."""
-		try:
-			slice_value = self._to_raw(value)
-		except NotImplementedError:
-			raise self._assignment_unsupported() from None
-
-		self.set_raw(array, slice_value)
 
 	def _to_raw(self, value: T) -> Any:
 		"""Convert the value to something suitable to assign to the field's slice.
 
-		Not required, but used in default implementation of ``_set()``.
+		Not required, but used in default implementation of ``set()``.
 		"""
 		raise NotImplementedError()
 
@@ -308,7 +310,7 @@ class StructArray[T: np.generic]:
 			if name not in self.fields.by_name:
 				raise ValueError(f'Invalid field name {name!r}')
 			field = self.fields[name]
-			field.__set__(self, value)
+			field.set(self.array, value)
 
 	def set_defaults(self) -> None:
 		"""Reset all field values to their defaults."""
