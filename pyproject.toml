@@ -7,15 +7,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structarrays"
+version = "0.1.0"
 authors = [
 	{name = "Jared Lumpe", email = "jared@jaredlumpe.com"},
 ]
 description = "Structured views of NumPy arrays"
 readme = "README.md"
 license = "MIT"
-
-# Get version number dynamically (see [tool.setuptools.dynamic])
-dynamic = ["version"]
 
 
 # ----------------------------------------- Dependencies ----------------------------------------- #
@@ -39,12 +37,6 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/jlumpe/structarrays"
 # Repository = "https://github.com/jlumpe/structarrays"
-
-
-[tool.setuptools.dynamic]
-# Set version from __version__ var in structarrays.__init__.py.
-# See https://packaging.python.org/en/latest/discussions/single-source-version
-version = {attr = "structarrays.__version__"}
 
 
 # ------------------------------------------------------------------------------------------------ #

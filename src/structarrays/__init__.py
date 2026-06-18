@@ -4,7 +4,6 @@ Structured views of NumPy arrays.
 
 __author__ = 'Jared Lumpe'
 __email__ = 'jared@jaredlumpe.com'
-__version__ = '0.1.0'
 
 
 __all__ = [
